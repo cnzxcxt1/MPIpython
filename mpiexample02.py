@@ -5,6 +5,8 @@ from __future__ import print_function
 import numpy as np
 from mpi4py import MPI
 from math import *
+import datetime
+from time import time
 
 from parutils import pprint
 
@@ -16,12 +18,19 @@ pprint("-"*78)
 pprint(" Running on %d cores" % size)
 pprint("-"*78)
 
-N = 10
+
+def calculateY(X):
+    value = sin(X[0]) + 7*sin(X[1])**2 + 0.1*(X[2]**4)*sin(X[0])
+    return value
+
+
+N = 1000000
 nbr_variable = 3
 total_calcul = N * (nbr_variable + 2)
 each_calcul = int(ceil(total_calcul / size))
 
 if rank == 0:
+    start = time()
     X1_1 = np.random.uniform(low=-pi, high=pi, size=N)
     X2_1 = np.random.uniform(low=-pi, high=pi, size=N)
     X3_1 = np.random.uniform(low=-pi, high=pi, size=N)
@@ -42,7 +51,7 @@ if rank == 0:
 
     data00 = AB[0, :]
     data01 = AB[1, :]
-    data02 = AB[0, :]
+    data02 = AB[2, :]
 else:
     data00 = ''
     data01 = ''
@@ -55,12 +64,50 @@ comm.Scatter([data00, MPI.DOUBLE], [data00_short, MPI.DOUBLE])
 comm.Scatter([data01, MPI.DOUBLE], [data01_short, MPI.DOUBLE])
 comm.Scatter([data02, MPI.DOUBLE], [data02_short, MPI.DOUBLE])
 
-data00_short *= 2
-combine_data = comm.gather(data00_short, root=0)
+AB_short = np.vstack((data00_short, data01_short, data02_short))
+#length = AB_short.shape[1]
+result_short = np.empty(each_calcul, dtype=np.float64)
+for i in range(each_calcul):
+    result_short[i] = calculateY(AB_short[:, i])
+
+combine_data = comm.gather(result_short, root=0)
 
 if rank == 0:
-    print("collected data in process [%d]" % comm.rank)
-    print(combine_data)
+    times_actual = datetime.datetime.now()
+    stop = time()
+    print(str(stop - start) + " seconds")
+
+    temp = np.asarray(combine_data[0])
+    for i in range(1, size):
+        temp = np.hstack((temp, np.asarray(combine_data[i])))
+    #print(temp)
+    #np.savetxt(savepath + '/y.csv', results, delimiter=',')
+    y = np.reshape(temp, (-1, N))
+    #print(y)
+
+    ya = y[0, :]
+    #np.savetxt(savepath + '/ya.csv', ya, delimiter=',')
+    yb = y[1, :]
+    #np.savetxt(savepath + '/yb.csv', yb, delimiter=',')
+    ynormal = y[2:, :]
+    #np.savetxt(savepath + '/ynormal.csv', ynormal, delimiter=',')
+
+    Vtotal = np.var(combine_data)
+    firstorder = []
+    Stotal = []
+
+    for i in range(3):
+        first = np.mean((ynormal[i, :] - ya) * yb) / Vtotal
+        firstorder.append(first)
+    print(firstorder)
+    #np.savetxt(savepath + '/Sfirstorder.csv', firstorder, delimiter=',')
+
+    for i in range(3):
+        total = 0.5 * np.mean((ya - ynormal[i, :]) ** 2) / Vtotal
+        Stotal.append(total)
+    print(Stotal)
+    #np.savetxt(savepath + '/Stotal.csv', Stotal, delimiter=',')
+
 
 
 
